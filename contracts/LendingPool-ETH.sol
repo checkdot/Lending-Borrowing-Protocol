@@ -58,6 +58,7 @@ contract LendingPool is Ownable, ReentrancyGuard {
     uint256 public constant INTEREST_RATE_BASE = 2e16; // 2% base annual rate
     uint256 public constant INTEREST_RATE_SLOPE = 10e16; // 10% slope based on utilization
     uint256 public constant SECONDS_PER_YEAR = 365 days;
+    uint256 public constant TIME_ELAPSE_INTERVAL = 5 minutes;
 
     // State variables
     mapping(address => mapping(address => Collateral)) public userCollateral; // user => token => collateral
@@ -115,7 +116,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
         // Initialize interest indices
         for (uint256 i = 0; i < supportedTokens.length; i++) {
             globalInterestIndex[supportedTokens[i]] = PRECISION;
-            lastInterestUpdate[supportedTokens[i]] = block.timestamp;
+            lastInterestUpdate[supportedTokens[i]] =
+                (block.timestamp / TIME_ELAPSE_INTERVAL) *
+                TIME_ELAPSE_INTERVAL;
         }
     }
 
@@ -131,7 +134,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
     function addToken(address token, uint256 weight) external onlyOwner {
         _addToken(token, weight);
         globalInterestIndex[token] = PRECISION;
-        lastInterestUpdate[token] = block.timestamp;
+        lastInterestUpdate[token] =
+            (block.timestamp / TIME_ELAPSE_INTERVAL) *
+            TIME_ELAPSE_INTERVAL;
     }
 
     function deposit(
@@ -305,11 +310,14 @@ contract LendingPool is Ownable, ReentrancyGuard {
         uint256 lastIndex = globalInterestIndex[token];
         uint256 lastUpdate = lastInterestUpdate[token];
 
-        if (lastUpdate == block.timestamp) {
+        uint256 currentTime = (block.timestamp / TIME_ELAPSE_INTERVAL) *
+            TIME_ELAPSE_INTERVAL;
+
+        if (lastUpdate == currentTime) {
             return lastIndex;
         }
 
-        uint256 timeElapsed = block.timestamp - lastUpdate;
+        uint256 timeElapsed = currentTime - lastUpdate;
         uint256 utilizationRate = _getUtilizationRate(token);
         uint256 borrowRate = _getBorrowRate(utilizationRate);
 
@@ -323,7 +331,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
     function _accrueInterest(address token) internal {
         uint256 newIndex = _calculateCurrentIndex(token);
         globalInterestIndex[token] = newIndex;
-        lastInterestUpdate[token] = block.timestamp;
+        lastInterestUpdate[token] =
+            (block.timestamp / TIME_ELAPSE_INTERVAL) *
+            TIME_ELAPSE_INTERVAL;
 
         emit InterestAccrued(token, newIndex);
     }
@@ -378,7 +388,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
             debt.principal = amount;
         }
         debt.interestIndex = globalInterestIndex[token];
-        debt.lastUpdateTime = block.timestamp;
+        debt.lastUpdateTime =
+            (block.timestamp / TIME_ELAPSE_INTERVAL) *
+            TIME_ELAPSE_INTERVAL;
 
         totalDebtPerToken[token] += amount;
         reserves[token] -= amount;
@@ -410,7 +422,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
         uint256 newDebt = currentDebt - amount;
         debt.principal = newDebt;
         debt.interestIndex = globalInterestIndex[token];
-        debt.lastUpdateTime = block.timestamp;
+        debt.lastUpdateTime =
+            (block.timestamp / TIME_ELAPSE_INTERVAL) *
+            TIME_ELAPSE_INTERVAL;
 
         // Reduce by the amount of principal (not including accrued interest that was paid)
         uint256 principalReduction = amount;
@@ -482,7 +496,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
         uint256 newDebt = currentDebt - debtAmount;
         debt.principal = newDebt;
         debt.interestIndex = globalInterestIndex[debtToken];
-        debt.lastUpdateTime = block.timestamp;
+        debt.lastUpdateTime =
+            (block.timestamp / TIME_ELAPSE_INTERVAL) *
+            TIME_ELAPSE_INTERVAL;
 
         totalDebtPerToken[debtToken] -= debtAmount;
 
