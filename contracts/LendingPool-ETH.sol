@@ -177,7 +177,7 @@ contract LendingPool is Ownable, ReentrancyGuard {
         // Check if withdrawal would make position unhealthy
         // After withdrawal: (capacity - withdrawalUSD) * MAX_BORROW_RATIO / 100 >= totalDebtUSD
         require(
-            currentCapacity > withdrawalUSD,
+            currentCapacity >= withdrawalUSD,
             "Withdrawal exceeds available collateral"
         );
 
