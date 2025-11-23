@@ -60,6 +60,8 @@ contract LendingPool is Ownable, ReentrancyGuard {
     uint256 public constant SECONDS_PER_YEAR = 365 days;
     uint256 public constant TIME_ELAPSE_INTERVAL = 5 minutes;
 
+    uint256 public lastEventNonce;
+
     // State variables
     mapping(address => mapping(address => Collateral)) public userCollateral; // user => token => collateral
     mapping(address => mapping(address => DebtInfo)) public userDebt; // user => token => debt info
@@ -75,22 +77,35 @@ contract LendingPool is Ownable, ReentrancyGuard {
     event Deposited(
         address indexed user,
         address indexed token,
-        uint256 amount
+        uint256 amount,
+        uint256 nonce
     );
     event Withdrawn(
         address indexed user,
         address indexed token,
-        uint256 amount
+        uint256 amount,
+        uint256 nonce
     );
-    event Borrowed(address indexed user, address indexed token, uint256 amount);
-    event Repaid(address indexed user, address indexed token, uint256 amount);
+    event Borrowed(
+        address indexed user,
+        address indexed token,
+        uint256 amount,
+        uint256 nonce
+    );
+    event Repaid(
+        address indexed user,
+        address indexed token,
+        uint256 amount,
+        uint256 nonce
+    );
     event Liquidated(
         address indexed liquidator,
         address indexed user,
         address indexed collateralToken,
         uint256 collateralAmount,
         address debtToken,
-        uint256 debtRepaid
+        uint256 debtRepaid,
+        uint256 nonce
     );
     event TokenAdded(address indexed token, uint256 weight);
     event PoolFunded(
@@ -151,7 +166,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
         totalCollateralPerToken[token] += amount;
         reserves[token] += amount;
 
-        emit Deposited(msg.sender, token, amount);
+        lastEventNonce = lastEventNonce + 1;
+
+        emit Deposited(msg.sender, token, amount, lastEventNonce);
     }
 
     function withdraw(address token, uint256 amount) external nonReentrant {
@@ -193,7 +210,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
 
         _transferOut(token, msg.sender, amount);
 
-        emit Withdrawn(msg.sender, token, amount);
+        lastEventNonce = lastEventNonce + 1;
+
+        emit Withdrawn(msg.sender, token, amount, lastEventNonce);
     }
 
     function getTokenPrice(address token) public view returns (uint256) {
@@ -395,7 +414,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
 
         _transferOut(token, msg.sender, amount);
 
-        emit Borrowed(msg.sender, token, amount);
+        lastEventNonce = lastEventNonce + 1;
+
+        emit Borrowed(msg.sender, token, amount, lastEventNonce);
     }
 
     function repay(
@@ -434,7 +455,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
 
         reserves[token] += amount;
 
-        emit Repaid(msg.sender, token, amount);
+        lastEventNonce = lastEventNonce + 1;
+
+        emit Repaid(msg.sender, token, amount, lastEventNonce);
     }
 
     function liquidate(
@@ -510,13 +533,16 @@ contract LendingPool is Ownable, ReentrancyGuard {
 
         _transferOut(collateralToken, msg.sender, collateralToSeize);
 
+        lastEventNonce = lastEventNonce + 1;
+
         emit Liquidated(
             msg.sender,
             user,
             collateralToken,
             collateralToSeize,
             debtToken,
-            debtAmount
+            debtAmount,
+            lastEventNonce
         );
     }
 
