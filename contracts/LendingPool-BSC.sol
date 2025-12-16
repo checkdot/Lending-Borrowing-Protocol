@@ -30,6 +30,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
     struct TokenConfig {
         uint256 weight; // 0-100, e.g., 100 = 1.0, 70 = 0.7
         bool isActive;
+        address pair;
+        bool isV2Pair;
+        address pairToken;
     }
 
     struct DebtInfo {
@@ -107,7 +110,12 @@ contract LendingPool is Ownable, ReentrancyGuard {
         uint256 debtRepaid,
         uint256 nonce
     );
-    event TokenAdded(address indexed token, uint256 weight);
+    event TokenAdded(
+        address indexed token,
+        uint256 weight,
+        address pair,
+        bool isV2Pair
+    );
     event PoolFunded(
         address indexed user,
         address indexed token,
@@ -122,36 +130,52 @@ contract LendingPool is Ownable, ReentrancyGuard {
 
     constructor() Ownable(msg.sender) {
         // Initialize supported tokens
-        _addToken(USDT, 100); // 1.0 weight
-        _addToken(NATIVE_BNB, 70); // 0.7 weight
-        _addToken(USDC, 100); // 1.0 weight
-        _addToken(WETH, 70); // 0.7 weight
-        _addToken(CDT, 50); // 0.5 weight
-
-        // Initialize interest indices
-        for (uint256 i = 0; i < supportedTokens.length; i++) {
-            globalInterestIndex[supportedTokens[i]] = PRECISION;
-            lastInterestUpdate[supportedTokens[i]] =
-                (block.timestamp / TIME_ELAPSE_INTERVAL) *
-                TIME_ELAPSE_INTERVAL;
-        }
+        _addToken(USDT, 100, address(0), false, USDT); // 1.0 weight
+        _addToken(USDC, 100, address(0), false, USDC); // 1.0 weight
+        _addToken(NATIVE_BNB, 70, WBNB_USDT_PAIR, true, USDT); // 0.7 weight
+        _addToken(WETH, 70, WETH_USDT_PAIR, true, USDT); // 0.7 weight
+        _addToken(CDT, 50, CDT_WBNB_PAIR, false, WBNB); // 0.5 weight
     }
 
-    function _addToken(address token, uint256 weight) internal {
+    function addToken(
+        address token,
+        uint256 weight,
+        address pair,
+        bool isV2Pair,
+        address pairToken
+    ) external onlyOwner {
+        _addToken(token, weight, pair, isV2Pair, pairToken);
+    }
+
+    function _addToken(
+        address token,
+        uint256 weight,
+        address pair,
+        bool isV2Pair,
+        address pairToken
+    ) internal {
         require(weight > 0 && weight <= 100, "Invalid weight");
         require(tokenConfigs[token].weight == 0, "Token already exists");
+        require(
+            pairToken == USDC || pairToken == USDT || pairToken == WBNB,
+            "Invalid pair token"
+        );
 
-        tokenConfigs[token] = TokenConfig({weight: weight, isActive: true});
+        tokenConfigs[token] = TokenConfig({
+            weight: weight,
+            isActive: true,
+            pair: pair,
+            isV2Pair: isV2Pair,
+            pairToken: pairToken
+        });
         supportedTokens.push(token);
-        emit TokenAdded(token, weight);
-    }
 
-    function addToken(address token, uint256 weight) external onlyOwner {
-        _addToken(token, weight);
         globalInterestIndex[token] = PRECISION;
         lastInterestUpdate[token] =
             (block.timestamp / TIME_ELAPSE_INTERVAL) *
             TIME_ELAPSE_INTERVAL;
+
+        emit TokenAdded(token, weight, pair, isV2Pair);
     }
 
     function deposit(
@@ -218,28 +242,33 @@ contract LendingPool is Ownable, ReentrancyGuard {
     function getTokenPrice(address token) public view returns (uint256) {
         _ensureTokenSupported(token);
 
+        TokenConfig memory config = tokenConfigs[token];
+
         if (token == USDT || token == USDC) {
             return 1e18; // $1.00 in 18 decimals
         }
 
         if (token == NATIVE_BNB || token == WBNB) {
-            // WBNB price = USDT balance / WBNB balance in WBNB/USDT pair
             return _getV2Price(WBNB_USDT_PAIR, USDT, WBNB);
         }
 
-        if (token == WETH) {
-            // WETH price = USDT balance / WETH balance in WETH/USDT pair
-            return _getV2Price(WETH_USDT_PAIR, USDT, WETH);
+        if (config.isV2Pair) {
+            if (config.pairToken == USDC || config.pairToken == USDT) {
+                return _getV2Price(config.pair, config.pairToken, token);
+            } else {
+                return
+                    (_getV2Price(config.pair, WBNB, token) *
+                        _getV2Price(WBNB_USDT_PAIR, USDT, WBNB)) / PRECISION;
+            }
+        } else {
+            if (config.pairToken == USDC || config.pairToken == USDT) {
+                return _getV3Price(config.pair, token, config.pairToken);
+            } else {
+                return
+                    (_getV3Price(config.pair, token, WBNB) *
+                        _getV2Price(WBNB_USDT_PAIR, USDT, WBNB)) / PRECISION;
+            }
         }
-
-        if (token == CDT) {
-            // CDT price = WBNB price * (WBNB balance / CDT balance in CDT/WBNB pair)
-            uint256 wbnbPrice = _getV2Price(WBNB_USDT_PAIR, USDT, WBNB);
-            uint256 cdtPrice = _getV3Price(CDT_WBNB_PAIR, CDT, WBNB);
-            return (wbnbPrice * cdtPrice) / PRECISION;
-        }
-
-        revert("No price calculation for token");
     }
 
     function _getV2Price(
