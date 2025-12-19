@@ -66,6 +66,9 @@ contract LendingPool is Ownable, ReentrancyGuard {
     uint256 public lastEventNonce;
 
     // State variables
+    address public feeWallet;
+    uint256 public depositFee = 3;
+
     mapping(address => mapping(address => Collateral)) public userCollateral; // user => token => collateral
     mapping(address => mapping(address => DebtInfo)) public userDebt; // user => token => debt info
     mapping(address => uint256) public totalCollateralPerToken; // token => total collateral in pool
@@ -127,13 +130,26 @@ contract LendingPool is Ownable, ReentrancyGuard {
     );
     event InterestAccrued(address indexed token, uint256 newIndex);
 
-    constructor() Ownable(msg.sender) {
+    event FeeConfigUpdated(address indexed newFeeWallet, uint256 newDepositFee);
+
+    constructor(address _feeWallet) Ownable(msg.sender) {
+        feeWallet = _feeWallet;
+
         // Initialize supported tokens
         _addToken(USDT, 100, address(0), false, USDT); // 1.0 weight
         _addToken(USDC, 100, address(0), false, USDC); // 1.0 weight
         _addToken(NATIVE_ETH, 70, WETH_USDT_PAIR, true, USDT); // 0.7 weight
         _addToken(WBNB, 70, WBNB_WETH_PAIR, true, WBNB); // 0.7 weight
         _addToken(CDT, 50, CDT_WETH_PAIR, false, WETH); // 0.5 weight
+    }
+
+    function setFeeConfig(
+        address _feeWallet,
+        uint256 _depositFee
+    ) external onlyOwner {
+        feeWallet = _feeWallet;
+        depositFee = _depositFee;
+        emit FeeConfigUpdated(_feeWallet, _depositFee);
     }
 
     function addToken(
@@ -184,10 +200,18 @@ contract LendingPool is Ownable, ReentrancyGuard {
         _ensureTokenSupported(token);
         require(amount > 0, "Amount must be greater than zero");
 
+        uint256 fee = (amount * depositFee) / 10000;
+        uint256 amountAfterFee = amount - fee;
+
         _transferIn(token, msg.sender, amount);
-        userCollateral[msg.sender][token].amount += amount;
-        totalCollateralPerToken[token] += amount;
-        reserves[token] += amount;
+
+        if (fee > 0) {
+            _transferOut(token, feeWallet, fee);
+        }
+
+        userCollateral[msg.sender][token].amount += amountAfterFee;
+        totalCollateralPerToken[token] += amountAfterFee;
+        reserves[token] += amountAfterFee;
 
         lastEventNonce = lastEventNonce + 1;
 
